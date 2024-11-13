@@ -80,6 +80,49 @@
 		}
 	}
 
+	function isInCodeBlock(text: string, cursorPosition: number): boolean {
+		// Get all ``` occurrences
+		const markers = Array.from(text.matchAll(/```/g));
+		
+		if (markers.length === 0) return false;
+		
+		let isInBlock = false;
+		
+		// Iterate through markers to determine if cursor is between a pair
+		for (const match of markers) {
+			const markerPosition = match.index!;
+			
+			// If we pass the cursor position, break since we don't need to check further
+			if (markerPosition > cursorPosition) break;
+			
+			// Toggle the state when we hit a marker
+			isInBlock = !isInBlock;
+		}
+		
+		// Count markers before cursor to see if we're in a block
+		const markersBeforeCursor = markers
+			.filter(match => match.index! <= cursorPosition)
+			.length;
+			
+		// If odd number of markers before cursor, we're in a block
+		return (markersBeforeCursor % 2) === 1;
+	}
+
+	function applyCodeBlockStyling() {
+		if (chatInputContainerElement) {
+			const text = prompt;
+			const textArea = chatInputElement;
+			const cursorPosition = textArea?.selectionStart ?? 0;
+
+			if (isInCodeBlock(text, cursorPosition)) {
+				toast.info($i18n.t('Testing'))
+				chatInputContainerElement.classList.add('code-block-active');
+			} else {
+				chatInputContainerElement.classList.remove('code-block-active');
+			}
+		}
+	}
+
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
 		element.scrollTo({
@@ -191,10 +234,143 @@
 		});
 	};
 
-	const handleKeyDown = (event: KeyboardEvent) => {
-		if (event.key === 'Escape') {
+	const handleKeyDown = async (e) => {
+		if (e.key === '`') {
+			const currentValue = prompt;
+			const cursorPosition = e.target.selectionStart;
+			await handleCodeBlock(e, currentValue, cursorPosition);
+		}
+		if (e.key === 'Escape') {
 			console.log('Escape');
 			dragged = false;
+		}
+
+		if (chatInputContainerElement) {
+			chatInputContainerElement.style.height = '';
+			chatInputContainerElement.style.height =
+				Math.min(chatInputContainerElement.scrollHeight, 200) + 'px';
+		}	
+
+		const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
+		const commandsContainerElement =
+			document.getElementById('commands-container');
+
+		// Command/Ctrl + Shift + Enter to submit a message pair
+		if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
+			e.preventDefault();
+			createMessagePair(prompt);
+		}
+
+		// Check if Ctrl + R is pressed
+		if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
+			e.preventDefault();
+			console.log('regenerate');
+
+			const regenerateButton = [
+				...document.getElementsByClassName('regenerate-response-button')
+			]?.at(-1);
+
+			regenerateButton?.click();
+		}
+
+		if (prompt === '' && e.key == 'ArrowUp') {
+			e.preventDefault();
+
+			const userMessageElement = [
+				...document.getElementsByClassName('user-message')
+			]?.at(-1);
+
+			const editButton = [
+				...document.getElementsByClassName('edit-user-message-button')
+			]?.at(-1);
+
+			console.log(userMessageElement);
+
+			userMessageElement.scrollIntoView({ block: 'center' });
+			editButton?.click();
+		}
+
+		if (commandsContainerElement && e.key === 'ArrowUp') {
+			e.preventDefault();
+			commandsElement.selectUp();
+
+			const commandOptionButton = [
+				...document.getElementsByClassName('selected-command-option-button')
+			]?.at(-1);
+			commandOptionButton.scrollIntoView({ block: 'center' });
+		}
+
+		if (commandsContainerElement && e.key === 'ArrowDown') {
+			e.preventDefault();
+			commandsElement.selectDown();
+
+			const commandOptionButton = [
+				...document.getElementsByClassName('selected-command-option-button')
+			]?.at(-1);
+			commandOptionButton.scrollIntoView({ block: 'center' });
+		}
+
+		if (commandsContainerElement && e.key === 'Enter') {
+			e.preventDefault();
+
+			const commandOptionButton = [
+				...document.getElementsByClassName('selected-command-option-button')
+			]?.at(-1);
+
+			if (e.shiftKey) {
+				prompt = `${prompt}\n`;
+			} else if (commandOptionButton) {
+				commandOptionButton?.click();
+			} else {
+				document.getElementById('send-message-button')?.click();
+			}
+		}
+
+		if (commandsContainerElement && e.key === 'Tab') {
+			e.preventDefault();
+
+			const commandOptionButton = [
+				...document.getElementsByClassName('selected-command-option-button')
+			]?.at(-1);
+
+			commandOptionButton?.click();
+		}
+
+		if (e.key === 'Escape') {
+			console.log('Escape');
+			atSelectedModel = undefined;
+		}
+
+	};
+
+	  // Update input handler to track cursor position changes
+	const handleInput = async (e) => {
+		if (chatInputContainerElement) {
+			chatInputContainerElement.style.height = '';
+			chatInputContainerElement.style.height = Math.min(chatInputContainerElement.scrollHeight, 200) + 'px';
+		}
+		applyCodeBlockStyling();
+	};
+
+	const handleCodeBlock = async (e: KeyboardEvent, currentValue: string, cursorPosition: number) => {
+		const beforeCursor = currentValue.slice(0, cursorPosition);
+
+		// Check if we just typed 3 backticks
+		if (beforeCursor.endsWith('``')) {
+			e.preventDefault();
+			const afterCursor = currentValue.slice(cursorPosition);
+
+			const codeBlock = `\`\`\`\n\n\`\`\``;
+			prompt = beforeCursor.slice(0, -2) + codeBlock + afterCursor;
+
+			await tick();
+
+			const newPosition = cursorPosition - 2 + 4;
+			e.target.selectionStart = newPosition;
+			e.target.selectionEnd = newPosition;
+			
+			// Apply styling after creating code block
+			applyCodeBlockStyling();
 		}
 	};
 
@@ -542,16 +718,11 @@
 												)}
 											on:enter={async (e) => {
 												if (prompt !== '') {
+													applyCodeBlockStyling();
 													dispatch('submit', prompt);
 												}
 											}}
-											on:input={async (e) => {
-												if (chatInputContainerElement) {
-													chatInputContainerElement.style.height = '';
-													chatInputContainerElement.style.height =
-														Math.min(chatInputContainerElement.scrollHeight, 200) + 'px';
-												}
-											}}
+											on:input={handleInput}
 											on:focus={async (e) => {
 												if (chatInputContainerElement) {
 													chatInputContainerElement.style.height = '';
@@ -562,105 +733,7 @@
 											on:keypress={(e) => {
 												e = e.detail.event;
 											}}
-											on:keydown={async (e) => {
-												e = e.detail.event;
-
-												if (chatInputContainerElement) {
-													chatInputContainerElement.style.height = '';
-													chatInputContainerElement.style.height =
-														Math.min(chatInputContainerElement.scrollHeight, 200) + 'px';
-												}
-
-												const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
-												const commandsContainerElement =
-													document.getElementById('commands-container');
-
-												// Command/Ctrl + Shift + Enter to submit a message pair
-												if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
-													e.preventDefault();
-													createMessagePair(prompt);
-												}
-
-												// Check if Ctrl + R is pressed
-												if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
-													e.preventDefault();
-													console.log('regenerate');
-
-													const regenerateButton = [
-														...document.getElementsByClassName('regenerate-response-button')
-													]?.at(-1);
-
-													regenerateButton?.click();
-												}
-
-												if (prompt === '' && e.key == 'ArrowUp') {
-													e.preventDefault();
-
-													const userMessageElement = [
-														...document.getElementsByClassName('user-message')
-													]?.at(-1);
-
-													const editButton = [
-														...document.getElementsByClassName('edit-user-message-button')
-													]?.at(-1);
-
-													console.log(userMessageElement);
-
-													userMessageElement.scrollIntoView({ block: 'center' });
-													editButton?.click();
-												}
-
-												if (commandsContainerElement && e.key === 'ArrowUp') {
-													e.preventDefault();
-													commandsElement.selectUp();
-
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-													commandOptionButton.scrollIntoView({ block: 'center' });
-												}
-
-												if (commandsContainerElement && e.key === 'ArrowDown') {
-													e.preventDefault();
-													commandsElement.selectDown();
-
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-													commandOptionButton.scrollIntoView({ block: 'center' });
-												}
-
-												if (commandsContainerElement && e.key === 'Enter') {
-													e.preventDefault();
-
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-
-													if (e.shiftKey) {
-														prompt = `${prompt}\n`;
-													} else if (commandOptionButton) {
-														commandOptionButton?.click();
-													} else {
-														document.getElementById('send-message-button')?.click();
-													}
-												}
-
-												if (commandsContainerElement && e.key === 'Tab') {
-													e.preventDefault();
-
-													const commandOptionButton = [
-														...document.getElementsByClassName('selected-command-option-button')
-													]?.at(-1);
-
-													commandOptionButton?.click();
-												}
-
-												if (e.key === 'Escape') {
-													console.log('Escape');
-													atSelectedModel = undefined;
-												}
-											}}
+											on:keydown={handleKeyDown}
 											on:paste={async (e) => {
 												e = e.detail.event;
 												console.log(e);
@@ -717,123 +790,9 @@
 												}
 											}
 										}}
-										on:keydown={async (e) => {
-											const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
-											const commandsContainerElement =
-												document.getElementById('commands-container');
-
-											// Command/Ctrl + Shift + Enter to submit a message pair
-											if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
-												e.preventDefault();
-												createMessagePair(prompt);
-											}
-
-											// Check if Ctrl + R is pressed
-											if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
-												e.preventDefault();
-												console.log('regenerate');
-
-												const regenerateButton = [
-													...document.getElementsByClassName('regenerate-response-button')
-												]?.at(-1);
-
-												regenerateButton?.click();
-											}
-
-											if (prompt === '' && e.key == 'ArrowUp') {
-												e.preventDefault();
-
-												const userMessageElement = [
-													...document.getElementsByClassName('user-message')
-												]?.at(-1);
-
-												const editButton = [
-													...document.getElementsByClassName('edit-user-message-button')
-												]?.at(-1);
-
-												console.log(userMessageElement);
-
-												userMessageElement.scrollIntoView({ block: 'center' });
-												editButton?.click();
-											}
-
-											if (commandsContainerElement && e.key === 'ArrowUp') {
-												e.preventDefault();
-												commandsElement.selectUp();
-
-												const commandOptionButton = [
-													...document.getElementsByClassName('selected-command-option-button')
-												]?.at(-1);
-												commandOptionButton.scrollIntoView({ block: 'center' });
-											}
-
-											if (commandsContainerElement && e.key === 'ArrowDown') {
-												e.preventDefault();
-												commandsElement.selectDown();
-
-												const commandOptionButton = [
-													...document.getElementsByClassName('selected-command-option-button')
-												]?.at(-1);
-												commandOptionButton.scrollIntoView({ block: 'center' });
-											}
-
-											if (commandsContainerElement && e.key === 'Enter') {
-												e.preventDefault();
-
-												const commandOptionButton = [
-													...document.getElementsByClassName('selected-command-option-button')
-												]?.at(-1);
-
-												if (e.shiftKey) {
-													prompt = `${prompt}\n`;
-												} else if (commandOptionButton) {
-													commandOptionButton?.click();
-												} else {
-													document.getElementById('send-message-button')?.click();
-												}
-											}
-
-											if (commandsContainerElement && e.key === 'Tab') {
-												e.preventDefault();
-
-												const commandOptionButton = [
-													...document.getElementsByClassName('selected-command-option-button')
-												]?.at(-1);
-
-												commandOptionButton?.click();
-											} else if (e.key === 'Tab') {
-												const words = findWordIndices(prompt);
-
-												if (words.length > 0) {
-													const word = words.at(0);
-													const fullPrompt = prompt;
-
-													prompt = prompt.substring(0, word?.endIndex + 1);
-													await tick();
-
-													e.target.scrollTop = e.target.scrollHeight;
-													prompt = fullPrompt;
-													await tick();
-
-													e.preventDefault();
-													e.target.setSelectionRange(word?.startIndex, word.endIndex + 1);
-												}
-
-												e.target.style.height = '';
-												e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-											}
-
-											if (e.key === 'Escape') {
-												console.log('Escape');
-												atSelectedModel = undefined;
-											}
-										}}
+										on:keydown={handleKeyDown}
 										rows="1"
-										on:input={async (e) => {
-											e.target.style.height = '';
-											e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-											user = null;
-										}}
+										on:input={handleInput}
 										on:focus={async (e) => {
 											e.target.style.height = '';
 											e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
@@ -1023,3 +982,19 @@
 		</div>
 	</div>
 </div>
+<style>
+    :global(.code-block-active) {
+        background-color: rgb(243 244 246) !important;
+        border: 1px solid rgb(229 231 235) !important;
+        border-radius: 4px !important;
+    }
+
+    :global(.dark .code-block-active) {
+        background-color: rgb(31 41 55) !important;
+        border-color: rgb(75 85 99) !important;
+    }
+
+    :global(.code-block-active :global(textarea)) {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    }
+</style>
